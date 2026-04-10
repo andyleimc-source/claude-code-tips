@@ -97,44 +97,6 @@ cs --list   # 纯列表模式查看所有会话
 
 ---
 
-## 5. 用 Advisor Strategy 以 Sonnet 价格获得 Opus 级别的判断力
-
-### 问题
-
-复杂任务想用 Opus 保证质量，但大部分步骤其实不需要 Opus，全程跑 Opus 成本太高。
-
-### 解决办法
-
-Anthropic 推出了 **Advisor Strategy**：让 Sonnet（或 Haiku）作为 Executor 跑主流程，只在遇到复杂决策点时调 Opus 作为 Advisor 提供指导。整个过程在**一次 `/v1/messages` 调用**内完成，无额外 round-trip。
-
-在 `tools` 数组里声明 `advisor_20260301` 即可启用：
-
-```python
-import anthropic
-
-client = anthropic.Anthropic()
-
-response = client.messages.create(
-    model="claude-sonnet-4-6",       # executor：跑主流程
-    max_tokens=4096,
-    tools=[
-        {
-            "type": "advisor_20260301",   # 声明 Advisor 工具
-            "name": "advisor",
-            "model": "claude-opus-4-6",   # advisor：仅在关键决策时介入
-            "max_uses": 3,                # 可选：限制 Opus 调用次数
-        }
-    ],
-    messages=[{"role": "user", "content": "..."}],
-)
-```
-
-**实测数据**：Sonnet + Opus 顾问比纯 Sonnet 在 SWE-bench Multilingual 上高 2.7%，同时成本降低 11.9%；Haiku + Opus 顾问分数比纯 Haiku 翻倍。
-
-**原文**：[The Advisor Strategy](https://claude.com/blog/the-advisor-strategy)
-
----
-
 ## 关注我
 
 <img src="./雷码工坊微信公众号.jpg" alt="雷码工坊笔记微信公众号" width="200" />
