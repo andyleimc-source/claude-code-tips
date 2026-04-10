@@ -97,6 +97,50 @@ cs --list   # 纯列表模式查看所有会话
 
 ---
 
+## 5. 用 Claude Code 驱动 AI 视频生产流水线
+
+### 问题
+
+AI 生图/生视频的 API 调用成本高、耗时长。写了 10 个镜头的 storyboard，跑到一半出错，或者某个镜头效果不好需要重跑，不得不全部重来。
+
+### 解决办法
+
+**脚本设计：幂等跳过 + 按镜头过滤**
+
+让每个镜头的输出文件作为"完成标志"，已存在则自动跳过；用 `--shots` 参数指定只重跑哪几个镜头：
+
+```python
+# 关键逻辑：文件存在即跳过
+img_path = output_dir / f"shot_{idx:02d}.png"
+if img_path.exists():
+    logging.info(f"[shot {idx}] 图片已存在，跳过生成")
+    continue
+```
+
+```bash
+# 只重新生成 shot_07 和 shot_09 的静帧
+python generate_shots.py \
+  --storyboard drafts/nocoly-48h/storyboard.json \
+  --only-images \
+  --shots 7,9
+```
+
+**Claude Code 在其中的角色**
+
+用 `CLAUDE.md` 把整个制作流程文档化（故事结构 → 视觉圣经 → 角色参考图 → 分镜 Prompt → 生图 → 生视频 → 剪辑），Claude 在每个步骤严格按规范执行，无需重复解释意图。
+
+将以下 prompt 发给 Claude Code 执行：
+
+```
+读 CLAUDE.md 了解制作规范，读 progress.md 确认当前进度，
+然后继续下一步：为 drafts/nocoly-48h 生成 storyboard.json
+的 image_prompt（遵循 PROMPT_GUIDE.md 自查清单）。
+```
+
+**完整工作流实战记录**：[我用 AI 做了一支企业剧情短片：从剧本到静帧的完整工作流](https://mp.weixin.qq.com/s/TODO)
+
+---
+
 ## 关注我
 
 <img src="./雷码工坊微信公众号.jpg" alt="雷码工坊笔记微信公众号" width="200" />
