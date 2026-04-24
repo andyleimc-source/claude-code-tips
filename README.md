@@ -194,6 +194,54 @@ cs --list   # 纯列表模式查看所有会话
 
 ---
 
+## 5. `/inpro` 项目初始化 skill — 多轮会话的共享记忆骨架
+
+### 问题
+
+和 Claude 做持续性项目（比如一个需要多天多轮对话推进的产品），每次开新会话上下文都丢了：上轮解决的 bug、做过的架构决策、当前做到哪、下一步该干嘛——都要人工复述。
+
+### 解决办法
+
+一个 Claude Code skill，在项目目录里一键生成 6 个协作骨架 md，并**内置"文档维护规则"**，让 Claude 在后续会话里主动维护它们：
+
+- `CLAUDE.md` — 项目说明 + 协作规则（Claude 每次启动自动加载）
+- `plan.md` — 当前迭代计划 / 里程碑
+- `progress.md` — 进度流水（日期倒序）
+- `decision.md` — 架构/选型决策记录
+- `bug.md` — 已知问题 & 修复
+- `handoff.md` — 会话交接（给下一轮 Claude 看）
+
+关键在 `CLAUDE.md` 里写死的维护规则——触发即更、改完直接 commit、不用人工提醒：
+
+- 修完 bug → `bug.md` OPEN 移 FIXED
+- 完成 plan 勾选项 / 阶段性进展 → 追加 `progress.md`
+- 新的架构/选型决策 → 追加 `decision.md`
+- scope 变化 / 里程碑调整 → 改 `plan.md`
+- 会话即将结束 → 刷新 `handoff.md`
+
+### 安装
+
+```bash
+git clone https://github.com/andyleimc-source/claude-code-tips.git /tmp/cct
+mkdir -p ~/.claude/skills
+cp -r /tmp/cct/skills/inpro ~/.claude/skills/
+```
+
+### 使用
+
+在 Claude Code 里（或任何支持 skill 的客户端）：
+
+```
+/inpro                  # 在当前 cwd 初始化
+/inpro /path/to/project # 在指定目录初始化
+```
+
+或直接说"初始化项目"/"inpro"也会触发。
+
+> **注意**：文档维护规则是**软约束**，靠模型读取 CLAUDE.md 后遵守，不是 harness 层强制。想要强制触发（比如 commit 前阻塞检查）用 hooks（`update-config` skill）。当前规则对日常项目已足够。
+
+---
+
 ## 关注我
 
 <img src="./雷码工坊微信公众号.jpg" alt="雷码工坊笔记微信公众号" width="200" />
