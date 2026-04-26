@@ -246,6 +246,92 @@ cp -r /tmp/cct/skills/inpro ~/.claude/skills/
 
 ---
 
+## 6. 每次回答完播放提示音（Stop hook + 自然语言开关）
+
+### 问题
+
+Claude Code 内置通知（`preferredNotifChannel`）只在**需要你输入**或**完成后窗口失焦**时才响，盯着看的时候不响。想要"每条回答完都叮一声"，并且能在新会话里用一句中文随手开关，不用记命令、不用编辑文件。
+
+### 解决办法
+
+用 **Stop hook + 状态文件**：hook 每轮回答完触发，命令里检查 `~/.claude/.bell-off` 是否存在，存在就静音。再把"自然语言开关"的规则写进 `~/.claude/CLAUDE.md`，让 Claude 在任意新会话里都能听懂"关声音/静音 1 小时/换成 Pop"这类话。
+
+#### 步骤 1：在 `~/.claude/settings.json` 加 Stop hook
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ ! -f ~/.claude/.bell-off ] && afplay /System/Library/Sounds/Morse.aiff &"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+`&` 让播放后台执行，不阻塞 Claude Code。`[ ! -f ... ] &&` 让状态文件存在时直接跳过。
+
+#### 步骤 2：在 `~/.claude/CLAUDE.md` 加自然语言规则
+
+```markdown
+## CC 提示音（Stop hook）
+- 全局 ~/.claude/settings.json 的 Stop hook 每轮回答完播放 Morse.aiff
+- 通过 ~/.claude/.bell-off 状态文件控制开关（文件存在=静音，不存在=响）
+- 用户说"关声音/静音/别响了" → `touch ~/.claude/.bell-off`
+- 用户说"开声音/恢复提示音" → `rm -f ~/.claude/.bell-off`
+- 用户说"静音 N 分钟/小时" → `touch ~/.claude/.bell-off && (sleep <秒数> && rm -f ~/.claude/.bell-off) &`
+- 用户问"现在响吗/声音状态" → 检查 ~/.claude/.bell-off 是否存在
+- 用户说"换成 X 声"（X ∈ Basso/Blow/Bottle/Frog/Funk/Glass/Hero/Morse/Ping/Pop/Purr/Sosumi/Submarine/Tink） → 改 settings.json hook 命令里的 .aiff 文件名
+- 即时生效，不用重启 CC
+```
+
+#### 步骤 3：让 hook 生效
+
+新加的 hook 当前会话不会立即生效——按一次 `/hooks` 重载，或重开 Claude Code。状态文件方案的好处是：**之后切换开关都即时生效**，不用再重载。
+
+### 用法
+
+| 你说 | Claude 做的 |
+|---|---|
+| "关声音" / "静音" / "别响了" | `touch ~/.claude/.bell-off` |
+| "开声音" / "恢复提示音" | `rm -f ~/.claude/.bell-off` |
+| "静音 1 小时" | `touch` + 后台 `sleep 3600 && rm` |
+| "现在响吗" | 检查文件并报告状态 |
+| "换成 Pop" | 改 settings.json 里的 `Morse.aiff` 为 `Pop.aiff` |
+
+### 可选声音（macOS 自带）
+
+`Basso` / `Blow` / `Bottle` / `Frog` / `Funk` / `Glass` / `Hero` / `Morse` / `Ping` / `Pop` / `Purr` / `Sosumi` / `Submarine` / `Tink`
+
+预览全部：
+
+```bash
+for s in Basso Blow Bottle Frog Funk Glass Hero Morse Ping Pop Purr Sosumi Submarine Tink; do
+  echo "▶ $s"; afplay /System/Library/Sounds/$s.aiff; sleep 0.3
+done
+```
+
+### 让 AI 帮你配
+
+把下面这段 prompt 丢给 Claude Code：
+
+```
+帮我配置 Stop hook 提示音功能：
+1. 在 ~/.claude/settings.json 的 hooks.Stop 里加一条 command hook，命令是
+   [ ! -f ~/.claude/.bell-off ] && afplay /System/Library/Sounds/Morse.aiff &
+2. 在 ~/.claude/CLAUDE.md 加一段"CC 提示音"规则，说明用 ~/.claude/.bell-off
+   状态文件做开关，用户说"关声音/开声音/静音 N 分钟/换成 X 声"时分别怎么操作。
+配完告诉我怎么让当前会话生效。
+```
+
+---
+
 ## 关注我
 
 <img src="./雷码工坊微信公众号.jpg" alt="雷码工坊笔记微信公众号" width="200" />
