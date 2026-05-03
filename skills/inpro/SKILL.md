@@ -58,6 +58,7 @@ description: Initialize a project with standard Claude collaboration docs — cr
 - `decision.md` — 架构/选型决策记录
 - `bug.md` — 已知问题 & 修复
 - `handoff.md` — 会话交接
+- `glossary.md` — 项目术语表（**条件触发**，见维护规则）
 
 ## 文档维护规则（无需用户提醒，主动执行）
 这些文件不是装饰，是多轮 Claude 会话共享记忆的载体。触发条件出现就立即更新，改完直接 commit 不要问：
@@ -67,6 +68,7 @@ description: Initialize a project with standard Claude collaboration docs — cr
 - **讨论出新任务、调整里程碑、scope 变化** → `plan.md`：改勾选项 / 加条目 / 移 out-of-scope
 - **会话即将结束、用户说"交接"、或讨论到新一轮该干啥** → 刷新 `handoff.md`
 - **发现新 bug 未当场修** → `bug.md` OPEN 区追加一条
+- **出现第 3 个项目专属术语，或发现自己/用户在用同一概念的不同名字** → 立即建 `glossary.md`，把术语收齐定义；之后新概念先补这里再用
 
 日期统一用真实当天日期（从环境 currentDate 取）。不要累积"等会儿一起更"，触发即更。
 
@@ -130,6 +132,30 @@ _（暂无）_
 
 ## FIXED
 _（暂无）_
+```
+
+### glossary.md（条件触发才建，不在初始化时创建）
+```markdown
+# Glossary — {项目名} 术语表
+
+本文件是项目的**权威术语定义**。讨论 / 文档 / 代码命名一律以此为准；新概念先补这里，再用。
+
+## 核心术语
+
+| 术语 | 中文 | 定义 | 例子 |
+|---|---|---|---|
+| **{Term}** | {中文} | {定义} | {例子} |
+
+## 外部工具 / 生态（如有）
+
+| 术语 | 全称 | 定义 |
+|---|---|---|
+
+## 维护规则
+
+- 新概念先在此补定义，再写进 spec / 代码
+- 改定义时，同步检查 spec / 代码引用是否需要更新
+- 弃用术语保留一段时间并标注「废弃，改用 X」，不要直接删
 ```
 
 ### handoff.md
