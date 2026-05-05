@@ -332,6 +332,61 @@ done
 
 ---
 
+## 7. 用 `y` 命令打开 yazi 文件管理器，退出时自动 cd 到最后停留的目录
+
+### 问题
+
+终端里在多层目录间切换很啰嗦。[yazi](https://github.com/sxyazi/yazi) 是一个超快的 TUI 文件管理器（Rust 写的，预览图片/视频/PDF），但它默认退出后 shell 还停在原来的目录——浏览半天找到目标目录，还得手动 `cd` 一次。
+
+### 解决办法
+
+包一个 shell 函数 `y`：启动 yazi 时把"退出时所在目录"写到临时文件，函数读出来再 `cd` 过去。yazi 官方推荐用法。
+
+#### 步骤 1：安装 yazi（macOS）
+
+```bash
+brew install yazi ffmpeg sevenzip jq poppler fd ripgrep fzf zoxide resvg imagemagick font-symbols-only-nerd-font
+```
+
+`yazi` 是核心，其余是预览/搜索依赖（PDF、图片、字体图标等），按需装。
+
+#### 步骤 2：在 `~/.zshrc` 加 `y` 函数
+
+```sh
+function y() {
+	local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
+	yazi "$@" --cwd-file="$tmp"
+	IFS= read -r -d '' cwd < "$tmp"
+	[ -n "$cwd" ] && [ "$cwd" != "$PWD" ] && builtin cd -- "$cwd"
+	rm -f -- "$tmp"
+}
+```
+
+bash 用户把上面这段放到 `~/.bashrc`，语法兼容。
+
+#### 步骤 3：生效
+
+```bash
+source ~/.zshrc
+```
+
+### 使用
+
+```bash
+y              # 在当前目录打开 yazi
+y ~/projects   # 直接在指定目录打开
+```
+
+进 yazi 后常用键：`hjkl` 移动 / `space` 选中 / `enter` 打开 / `q` 退出 / `cd` 输入路径跳转。退出后 shell 已自动 `cd` 到 yazi 最后停留的目录。
+
+### 让 AI 帮你配
+
+```
+帮我装 yazi 并在 ~/.zshrc 里加一个 y() 函数，要求退出 yazi 后 shell 自动 cd 到 yazi 最后停留的目录。
+```
+
+---
+
 ## 关注我
 
 <img src="./雷码工坊微信公众号.jpg" alt="雷码工坊笔记微信公众号" width="200" />
