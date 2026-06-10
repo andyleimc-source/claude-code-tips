@@ -20,6 +20,7 @@ description: Initialize a project with standard Claude collaboration docs — cr
    - 如果目录不存在：`mkdir -p` 建好
 
 2. **检查冲突**
+   - **防误用 guard**：如果目标目录已有 CLAUDE.md 且内容明显是另一套规范（比如 dailymd 这类自带任务/项目体系的仓库，或路径在 dailymd 下），先停下来提示用户"这里已有自己的协作体系，确定要铺 inpro 骨架吗？"，确认后再继续
    - 如果目标目录已存在同名 md，不要覆盖，询问用户："发现 X 已存在，要覆盖 / 跳过 / 合并？"
    - 其它文件直接写入
 
@@ -29,8 +30,8 @@ description: Initialize a project with standard Claude collaboration docs — cr
 
 4. **写入 6 个文件**，按下方模板，**把项目名、目标、上下文填进去**，不要留空模板给用户自己填
 
-5. **git 初始化（可选）**
-   - 如果目录不是 git 仓库，问一句要不要 `git init` + 首个 commit
+5. **git 初始化**
+   - 如果目录不是 git 仓库，直接 `git init` + 首个 commit，不用问（遵循全局规则）
 
 6. **汇报**
    - 一句话说建了什么，在哪里，用户下一步应该 cd 过去开新会话
@@ -58,7 +59,6 @@ description: Initialize a project with standard Claude collaboration docs — cr
 - `decision.md` — 架构/选型决策记录
 - `bug.md` — 已知问题 & 修复
 - `handoff.md` — 会话交接
-- `glossary.md` — 项目术语表（**条件触发**，见维护规则）
 
 ## 文档维护规则（无需用户提醒，主动执行）
 这些文件不是装饰，是多轮 Claude 会话共享记忆的载体。触发条件出现就立即更新，改完直接 commit 不要问：
