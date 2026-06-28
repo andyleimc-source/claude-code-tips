@@ -23,11 +23,10 @@ week_used=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // emp
 
 # Current working directory (basename only)
 cwd_full=$(echo "$input" | jq -r '.workspace.current_dir // .cwd // empty')
-if [ -n "$cwd_full" ]; then
-  cwd_base=$(basename "$cwd_full")
-else
-  cwd_base=$(basename "$PWD")
+if [ -z "$cwd_full" ]; then
+  cwd_full="$PWD"
 fi
+cwd_base=$(basename "$(dirname "$cwd_full")")/$(basename "$cwd_full")
 
 # Git branch (suppress all errors; omit if not in a git repo)
 git_branch=""
@@ -38,6 +37,9 @@ else
 fi
 
 SEP=" · "
+
+# Machine name (mkp / work …) so it's clear which Mac this session runs on
+host=$(scutil --get LocalHostName 2>/dev/null || hostname -s)
 
 # Build output segments
 parts=""
@@ -70,6 +72,11 @@ fi
 if [ -n "$week_used" ]; then
   week_remaining=$(echo "$week_used" | awk '{printf "%.0f", 100 - $1}')
   parts="${parts}${SEP}7d ${week_remaining}%"
+fi
+
+if [ -n "$host" ]; then
+  host_part=$(printf "\033[36m%s\033[0m" "$host")
+  [ -n "$parts" ] && parts="${host_part}${SEP}${parts}" || parts="$host_part"
 fi
 
 echo "$parts"
