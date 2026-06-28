@@ -1,0 +1,21 @@
+#!/bin/sh
+# pre-commit:提交前自动把 statusline-command.sh 从 dotfiles(唯一真相源)同步进来。
+# 仅在装了本仓库 hook 的机器上生效(见 scripts/install-hooks.sh);公开 clone 者不受影响。
+#
+# dotfiles 源不可用时(别的机器/没克隆 dotfiles)只警告、不阻塞提交。
+
+ROOT="$(git rev-parse --show-toplevel)"
+SYNC="$ROOT/scripts/sync-from-dotfiles.sh"
+
+[ -x "$SYNC" ] || exit 0
+
+if "$SYNC" >/dev/null 2>&1; then
+  if ! git diff --quiet -- statusline-command.sh 2>/dev/null; then
+    git add statusline-command.sh
+    echo "[pre-commit] statusline-command.sh 已从 dotfiles 同步并加入本次提交"
+  fi
+else
+  echo "[pre-commit] 跳过 statusline 同步(dotfiles 源不可用),不影响本次提交"
+fi
+
+exit 0
