@@ -55,7 +55,10 @@ if [ -n "$model" ]; then
   [ -n "$parts" ] && parts="${parts}${SEP}${model}" || parts="$model"
 fi
 
-parts="${parts}${SEP}${ctx_part}"
+# Context usage placed next to the model (right side)
+if [ -n "$ctx_part" ]; then
+  [ -n "$parts" ] && parts="${parts}${SEP}${ctx_part}" || parts="$ctx_part"
+fi
 
 if [ -n "$five_used" ] && [ -n "$five_resets" ]; then
   five_remaining=$(echo "$five_used" | awk '{printf "%.0f", 100 - $1}')

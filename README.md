@@ -389,6 +389,92 @@ y ~/projects   # 直接在指定目录打开
 
 ---
 
+## 8. `facd` 模糊跳目录 —— 输入片段 + fzf 选择器（带创建/修改时间和大小预览）
+
+### 问题
+
+在几十个项目目录间切换，`cd ~/Documents/coding/xxx/yyy` 打全路径太累，`zoxide` 又只认你去过的目录、认不准同名的新目录。想要：**输入目录名的一个片段，从常用根目录里模糊搜出所有匹配，用 fzf 上下键选**，右侧还能顺手看到这个目录的创建/修改时间和体积，避免进错版本。
+
+### 解决办法
+
+在 `~/.zshrc` 里包一组函数：`facd`（从固定几个根搜）/ `fcd`（只搜当前目录下）/ `mkcd`（建了就进）。核心是 `find` 出候选喂给 `fzf`，预览窗口用 `stat` + `du` 懒加载显示信息。
+
+**效果：** `facd studio` → 列出所有名字含 `studio` 的目录，回车进；只有一个匹配时直接跳、不弹选择器。
+
+#### 步骤 1：装依赖（macOS）
+
+```bash
+brew install fzf
+```
+
+#### 步骤 2：在 `~/.zshrc` 加函数
+
+```sh
+# Fuzzy cd helpers — fzf 选择器(↑↓ 选 / Enter 进 / Esc 取消)
+# 右侧预览含:创建时间 / 修改时间 / 文件夹大小(按高亮项懒加载,du 不卡)
+_FACD_PREVIEW='d={2};
+  stat -f "创建   %SB%n修改   %Sm" -t "%Y-%m-%d %H:%M" "$d";
+  printf "大小   "; du -sh "$d" 2>/dev/null | cut -f1'
+_facd_core() {
+  local pattern="${@[-1]}" roots=("${@[1,-2]}")
+  local dirs=() root rdir rdepth
+  # 每个根默认深度 3;写成 "<路径>::<深度>" 可单独指定(如 home 根只搜深度 1,避开 Library/node_modules)
+  for root in "${roots[@]}"; do
+    rdir="${root%%::*}"; rdepth=3
+    [[ "$root" == *"::"* ]] && rdepth="${root##*::}"
+    while IFS= read -r line; do dirs+=("$line"); done \
+      < <(find "$rdir" -maxdepth "$rdepth" -type d -iname "*$pattern*" 2>/dev/null)
+  done
+  case ${#dirs[@]} in
+    0) echo "没找到匹配 '$pattern' 的目录"; return 1 ;;
+    1) cd "${dirs[1]}"; return ;;
+  esac
+  local lines=() d short
+  for d in "${dirs[@]}"; do
+    short="$(basename "$(dirname "$d")")/$(basename "$d")"
+    lines+=("$short"$'\t'"$d")
+  done
+  local sel
+  sel="$(printf '%s\n' "${lines[@]}" | fzf --delimiter=$'\t' --with-nth=1 \
+    --height=80% --reverse --ansi --prompt='cd> ' \
+    --preview "$_FACD_PREVIEW" --preview-window='right,46%,wrap')"
+  [ -n "$sel" ] && cd "${sel#*$'\t'}"
+}
+# 改成你自己的常用根目录;"$HOME::1" 表示 home 只搜一层,避开 Library
+facd() { _facd_core ~/coding ~/Documents ~/Desktop "$HOME::1" "$1"; }
+fcd()  { _facd_core . "$1"; }
+mkcd() { mkdir -p "$1" && cd "$1"; }
+```
+
+`_facd_core` 接受「若干根 + 最后一个参数是搜索词」，每个根默认往下搜 3 层；某个根写成 `路径::层数` 可单独限定深度（例子里 `$HOME::1` 让家目录只搜一层，避开 `Library`、`node_modules` 这种深坑）。`fzf` 里只显示 `父目录/目录名` 两段，右侧预览懒加载 `stat`（创建/修改时间）和 `du`（体积）。
+
+#### 步骤 3：生效
+
+```bash
+source ~/.zshrc
+```
+
+### 使用
+
+```bash
+facd studio    # 从 ~/coding ~/Documents ~/Desktop 和 home(1层) 里模糊找含 "studio" 的目录
+fcd src        # 只在当前目录下往下找含 "src" 的目录
+mkcd ~/tmp/new # 新建目录并直接进去
+```
+
+唯一匹配直接跳；多个匹配弹 fzf，↑↓ 选、Enter 进、Esc 取消；进之前右侧就能看到目标目录的时间和大小。
+
+### 让 AI 帮你配
+
+```
+帮我在 ~/.zshrc 里加一组 fzf 模糊 cd 函数：facd 从 ~/coding ~/Documents ~/Desktop
+和 home(只搜一层) 里按名字片段找目录，用 fzf 选择器让我上下键选，右侧预览显示该目录
+的创建时间、修改时间和体积；只有一个匹配时直接 cd 过去。另外再加 fcd(只搜当前目录下)
+和 mkcd(建了就进)。依赖 fzf，没装就先 brew install fzf。
+```
+
+---
+
 ## 关注我
 
 <img src="./雷码工坊微信公众号.jpg" alt="雷码工坊笔记微信公众号" width="200" />
