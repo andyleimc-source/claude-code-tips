@@ -475,6 +475,110 @@ mkcd ~/tmp/new # 新建目录并直接进去
 
 ---
 
+## 9. `op/of/oc/oh` 按文件名全盘找并打开 —— 不用管文件在哪个目录
+
+### 问题
+
+想打开一个文件（`profiles-overview.html`、某张报销单、某个截图），但不记得它在哪个目录。手动 `cd` 半天、或用 Finder 一层层翻很烦。希望在终端任何位置敲一个短命令 + 文件名，就自动找到并打开它；有多个同名文件时能列出**完整路径**让我上下键挑。
+
+### 解决办法
+
+一组 `o` 开头的文件命令族，共用一个「`fd` 全盘找 → 唯一直接干 / 多个 `fzf` 挑」的核心：
+
+| 命令 | 作用 |
+|------|------|
+| `op <文件名>` | **o**pen，用系统默认程序打开（.pdf→预览、.html→浏览器、.xlsx→Excel…一视同仁） |
+| `of <文件名>` | open in **f**inder，在 Finder 里定位并**选中**该文件（`open -R`） |
+| `oc <文件名>` | open **c**opy，把该文件的**完整路径**复制到剪贴板（`pbcopy`） |
+| `oh` | **h**elp，本速查表 |
+
+唯一命中直接执行；多个同名弹 `fzf`，显示完整路径 + 右侧预览（修改时间/大小），↑↓ 选、Enter 确认、Esc 取消。支持通配：`op '*.html'`、`op 'report*'`。依赖 `fd` 和 `fzf`（`brew install fd fzf`）。
+
+> 说明：本想用 `do` 表示 direct open，但 `do` 是 shell 保留字（`for…do…done`）用不了，故用 `op`；`d` 又被 oh-my-zsh 的目录栈快捷键占用，故帮助命令用 `oh`。
+
+#### 步骤 1：把下面这组函数加到 `~/.zshrc`
+
+```zsh
+# ── 文件命令族(op/of/oc/oh):不管在哪个目录,按文件名全盘找 ──
+#   唯一命中→直接动作;多个同名→fzf 列表(显示完整路径,↑↓ 选 / Enter 确认 / Esc 取消)
+#   支持通配:op profiles-overview.html  /  op '*.html'  /  op 'report*'
+#   默认在 $HOME 下搜(排除 Library / 垃圾桶 / 依赖 / 缓存)。oh 看速查表。
+# _dfind <文件名> — 内部核心:解析出唯一/选中的【绝对路径】打到 stdout;没找到或取消→return 1
+_dfind() {
+  emulate -L zsh
+  local name="$1"
+  local -a matches
+  matches=("${(@f)$(fd --glob --type f --hidden --no-ignore \
+    --exclude Library --exclude node_modules --exclude .git \
+    --exclude .Trash --exclude Caches --exclude .cache \
+    -- "$name" "$HOME" 2>/dev/null)}")
+  matches=(${matches:#})   # 去掉空元素
+  case ${#matches[@]} in
+    0) echo "没找到 '$name'(在 $HOME 下)" >&2; return 1 ;;
+    1) print -r -- "${matches[1]}" ;;
+    *)
+      local lines=() f sel
+      for f in "${matches[@]}"; do lines+=("${f/#$HOME/~}"$'\t'"$f"); done
+      sel=$(printf '%s\n' "${lines[@]}" | fzf \
+        --delimiter=$'\t' --with-nth=1 \
+        --height=70% --reverse --prompt='pick> ' \
+        --header="${#matches[@]} 个同名文件 — ↑↓ 选 · Enter 确认 · Esc 取消" \
+        --preview 'stat -f "修改   %Sm%n大小   %z bytes" -t "%Y-%m-%d %H:%M" {2}' \
+        --preview-window='down,3,wrap')
+      [ -n "$sel" ] || return 1
+      print -r -- "${sel#*$'\t'}"
+      ;;
+  esac
+}
+# op <文件名> — direct open:找到并用默认程序打开
+op() { emulate -L zsh; local f; f=$(_dfind "${1:?用法: op <文件名>   例:op report.pdf}") || return 1; echo "→ 打开 ${f/#$HOME/~}"; open "$f"; }
+# of <文件名> — open in finder:在 Finder 里定位并选中该文件,方便你找到它
+of() { emulate -L zsh; local f; f=$(_dfind "${1:?用法: of <文件名>   例:of report.pdf}") || return 1; echo "→ Finder 定位 ${f/#$HOME/~}"; open -R "$f"; }
+# oc <文件名> — open copy:把该文件的完整路径复制到剪贴板
+oc() { emulate -L zsh; local f; f=$(_dfind "${1:?用法: oc <文件名>   例:oc report.pdf}") || return 1; printf '%s' "$f" | pbcopy; echo "→ 已复制路径到剪贴板:${f/#$HOME/~}"; }
+# oh — 列出文件命令族速查表
+oh() {
+  print -P "%B%F{green}文件命令族%f%b — 不管在哪个目录,按文件名全盘找(在 \$HOME 下)"
+  print -P "  %F{yellow}op%f <文件名>   打开文件(系统默认程序)        例:op report.pdf"
+  print -P "  %F{yellow}of%f <文件名>   在 Finder 里定位并选中该文件     例:of report.pdf"
+  print -P "  %F{yellow}oc%f <文件名>   复制该文件的完整路径到剪贴板     例:oc report.pdf"
+  print -P "  %F{yellow}oh%f           本速查表"
+  print -P "  %F{8}多个同名 → fzf 列表(↑↓ 选 / Enter 确认 / Esc 取消);支持通配如 '*.html'%f"
+}
+```
+
+#### 步骤 2：生效
+
+```bash
+source ~/.zshrc
+```
+
+### 使用
+
+```bash
+op profiles-overview.html   # 全盘找,唯一就用默认程序打开;多个同名弹 fzf 挑
+op 报销单.pdf                # 任何格式都行(→ 预览)
+op '*.html'                 # 支持通配
+of report.pdf               # 在 Finder 里定位并选中它
+oc report.pdf               # 复制它的完整路径到剪贴板,粘哪都行
+oh                          # 忘了命令就敲这个
+```
+
+搜索范围是整个 `$HOME`（排除了 `Library`、垃圾桶、`node_modules`、缓存这些噪音），所以你在哪个目录都无所谓，全盘搜大约 3~4 秒。
+
+### 让 AI 帮你配
+
+```
+帮我在 ~/.zshrc 里加一组 o 开头的「按文件名全盘找并打开」命令族,共用一个基于 fd + fzf
+的核心:op <文件名> 用系统默认程序打开、of 在 Finder 里定位并选中(open -R)、oc 复制该文件
+完整路径到剪贴板(pbcopy)、oh 打印速查表。搜索范围是整个 $HOME,排除 Library/垃圾桶/
+node_modules/缓存;唯一命中直接执行,多个同名弹 fzf 列出完整路径(带修改时间/大小预览)让我
+↑↓ 选、Enter 确认;支持通配如 '*.html'。依赖 fd 和 fzf,没装先 brew install fd fzf。
+注意 do 是 shell 保留字用不了、d 常被 oh-my-zsh 占用,所以用 op 和 oh。
+```
+
+---
+
 ## 关注我
 
 <img src="./雷码工坊微信公众号.jpg" alt="雷码工坊笔记微信公众号" width="200" />
