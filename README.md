@@ -579,6 +579,35 @@ node_modules/缓存;唯一命中直接执行,多个同名弹 fzf 列出完整路
 
 ---
 
+## 10. 在 tmux 里跑 Claude Code，鼠标拖选复制不到系统剪贴板
+
+### 问题
+
+Claude Code 在 tmux 里跑，想把它输出的东西（一段 prompt、一段代码、一个路径）复制到别处，
+鼠标拖选之后 `Cmd+C` 却什么都粘不出来，还会响一声系统提示音。按住 `Shift` 再拖也没用。
+
+原因是 tmux 开了 `mouse on`，拖选被 tmux 自己截走进了它的复制模式，只进 tmux 内部的
+buffer，压根没到 macOS 剪贴板。很多人配的 `set -g set-clipboard external`（走 OSC52
+让终端代传）在部分终端 / 部分 tmux 版本上不生效，于是看起来「复制了个寂寞」。
+
+### 解决办法
+
+不依赖 OSC52，把复制那一步显式接到 `pbcopy`。把下面这段发给 Claude Code：
+
+```
+我的 tmux 开着 mouse on，鼠标拖选复制不到 macOS 系统剪贴板（Cmd+C 粘不出东西）。
+帮我改 ~/.tmux.conf：把鼠标拖选结束、回车、双击选词、三击选行这四个动作的复制命令都显式
+接到 pbcopy，也就是 send-keys -X copy-pipe-and-cancel "pbcopy"。
+注意先用 tmux show -g mode-keys 看是 emacs 还是 vi：emacs 绑在 copy-mode 表，
+vi 绑在 copy-mode-vi 表，绑错表不生效。改完跑 tmux source-file ~/.tmux.conf 重载，
+并用 tmux list-keys 验证绑上了。
+```
+
+改完**直接拖选就行，不用再按 Cmd+C**——松开鼠标那一刻就已经在系统剪贴板里了，
+双击选词、三击选整行同样管用。
+
+---
+
 ## 关注我
 
 <img src="./雷码工坊微信公众号.jpg" alt="雷码工坊笔记微信公众号" width="200" />
