@@ -584,18 +584,23 @@ node_modules/缓存;唯一命中直接执行,多个同名弹 fzf 列出完整路
 ### 问题
 
 Claude Code 在 tmux 里跑，想把它输出的东西（一段 prompt、一段代码、一个路径）复制到别处，
-鼠标拖选之后 `Cmd+C` 却什么都粘不出来，还会响一声系统提示音。按住 `Shift` 再拖也没用。
+鼠标拖选之后 `Cmd+C` 什么都粘不出来，还会响一声系统提示音。按住 `Shift` 再拖也没用。
 
-原因是 tmux 开了 `mouse on`，拖选被 tmux 自己截走进了它的复制模式，只进 tmux 内部的
-buffer，压根没到 macOS 剪贴板。很多人配的 `set -g set-clipboard external`（走 OSC52
-让终端代传）在部分终端 / 部分 tmux 版本上不生效，于是看起来「复制了个寂寞」。
+这里其实是**两层原因叠在一起**，只解一层不管用：
+
+1. tmux 开着 `mouse on`，拖选被 tmux 截走进它自己的复制模式，只进 tmux 内部 buffer，
+   没到 macOS 剪贴板。很多人配的 `set -g set-clipboard external`（走 OSC52 让终端代传）
+   在部分终端 / 部分 tmux 版本上不生效。
+2. **更关键的一层**：Claude Code 的界面自己开了鼠标上报，鼠标事件被它吃掉，
+   tmux 连拖选都收不到——所以光改 tmux 绑定还是没反应。
+   自查一句：`tmux display -p '#{?mouse_any_flag,程序开了鼠标,没开}'`。
 
 ### 解决办法
 
-不依赖 OSC52，把复制那一步显式接到 `pbcopy`。把下面这段发给 Claude Code：
+**第一步，让 tmux 的复制真的落到系统剪贴板。** 把下面这段发给 Claude Code：
 
 ```
-我的 tmux 开着 mouse on，鼠标拖选复制不到 macOS 系统剪贴板（Cmd+C 粘不出东西）。
+我的 tmux 开着 mouse on，鼠标拖选复制不到 macOS 系统剪贴板（Cmd+V 粘不出东西）。
 帮我改 ~/.tmux.conf：把鼠标拖选结束、回车、双击选词、三击选行这四个动作的复制命令都显式
 接到 pbcopy，也就是 send-keys -X copy-pipe-and-cancel "pbcopy"。
 注意先用 tmux show -g mode-keys 看是 emacs 还是 vi：emacs 绑在 copy-mode 表，
@@ -603,8 +608,18 @@ vi 绑在 copy-mode-vi 表，绑错表不生效。改完跑 tmux source-file ~/.
 并用 tmux list-keys 验证绑上了。
 ```
 
-改完**直接拖选就行，不用再按 Cmd+C**——松开鼠标那一刻就已经在系统剪贴板里了，
-双击选词、三击选整行同样管用。
+**第二步，复制时先进复制模式再拖。** 在 Claude Code 那个窗格里：
+
+```
+先按 Ctrl+B 再按 [        # 进入 tmux 复制模式
+然后用鼠标拖选要的内容      # 松开鼠标的那一刻就进系统剪贴板了
+```
+
+进了复制模式，鼠标归 tmux 管，跟程序有没有开鼠标上报无关。选完自动退出复制模式，
+`Cmd+V` 直接粘。双击选词、三击选整行同样管用。
+
+> 顺带：让 Claude Code 直接把内容 `pbcopy` 到剪贴板，也是一条更省事的路——
+> 「把刚才那段 prompt 用 pbcopy 放进我剪贴板」，它跑一条命令就好了。
 
 ---
 
