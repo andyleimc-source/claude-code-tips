@@ -44,18 +44,34 @@ Claude Code 底部状态栏默认没有显示有用信息，无法直观看到�
 
 ### 解决办法
 
-状态栏通过 `~/.claude/settings.json` 里的 `statusLine` 配置执行一个 shell 脚本，脚本从 stdin 读 JSON，输出一行字符串渲染到底部。
+状态栏通过 `~/.claude/settings.json` 里的 `statusLine` 配置执行一个 shell 脚本，脚本从 stdin 读 JSON，把输出渲染到底部。**支持多行**，所以下面这份分三行排。
 
 **效果：**
 
 ```
-studio · Opus · ctx 94% · 5h 73% ~18:30 · 7d 82%
+studio · coding/myapp
+Opus · ctx 94% · 5h 73% ~18:30 · 7d 82%
+给状态栏加会话标题
 ```
 
-依次展示：**当前目录名**（基于工作区路径，仅取最后一段）· **git 分支**（仅当 ≠ main/master 时显示，例如 `studio (feat-x)`）· **模型名**（只取首词，如 `Opus` / `Sonnet` / `Haiku`）· **上下文剩余 %** · **5 小时窗口剩余 % + 重置时刻** · **7 天窗口剩余 %**。
+- **第一行（在哪）**：机器名 · 目录（父目录/当前目录两段）· git 分支。分支是 main/master 时不显示，省地方；worktree 那种目录名和分支名重复的情况会自动折叠成一个 `wt <名字>`。
+- **第二行（这次会话）**：模型名（只取首词，如 `Opus` / `Sonnet` / `Haiku`）· 上下文剩余 % · 5 小时窗口剩余 % + 重置时刻 · 7 天窗口剩余 %。
+- **第三行（在干什么）**：会话标题。没有标题就不占这行。想让它在话题跑偏时自动改名，见 [技巧 11](#11-状态栏显示会话标题并让-ai-在话题跑偏时自己改名)。
+
+> 只想要单行的话，把脚本结尾那三行输出改成 `printf "%s · %s\n" "$line1" "$line2"` 就行。
 
 #### 步骤 1：保存脚本到 `~/.claude/statusline-command.sh`
 
+本仓库根目录的 [`statusline-command.sh`](./statusline-command.sh) 就是这份脚本的最新快照，可以直接下载：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/andyleimc-source/claude-code-tips/main/statusline-command.sh \
+  -o ~/.claude/statusline-command.sh
+```
+
+或者手抄：
+
+<!-- BEGIN statusline-command.sh（由 scripts/sync-from-dotfiles.sh 自动回填，勿手改）-->
 ```sh
 #!/bin/sh
 input=$(cat)
@@ -82,13 +98,12 @@ week_used=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // emp
 
 # Current working directory (basename only)
 cwd_full=$(echo "$input" | jq -r '.workspace.current_dir // .cwd // empty')
-if [ -n "$cwd_full" ]; then
-  cwd_base=$(basename "$cwd_full")
-else
-  cwd_base=$(basename "$PWD")
+if [ -z "$cwd_full" ]; then
+  cwd_full="$PWD"
 fi
+cwd_base=$(basename "$(dirname "$cwd_full")")/$(basename "$cwd_full")
 
-# Git branch (suppress errors; omit if not in a git repo)
+# Git branch (suppress all errors; omit if not in a git repo)
 git_branch=""
 if [ -n "$cwd_full" ]; then
   git_branch=$(git -C "$cwd_full" rev-parse --abbrev-ref HEAD 2>/dev/null)
@@ -98,41 +113,101 @@ fi
 
 SEP=" · "
 
-# Build output segments
-parts=""
+# Machine name (mkp / work …) so it's clear which Mac this session runs on
+host=$(scutil --get LocalHostName 2>/dev/null || hostname -s)
 
-# Hide branch when it's main/master (default)
-if [ -n "$git_branch" ] && [ "$git_branch" != "main" ] && [ "$git_branch" != "master" ]; then
-  parts=$(printf "\033[33m%s\033[0m \033[32m(%s)\033[0m" "$cwd_base" "$git_branch")
+# ── Line 1: location (host · dir/branch) ──────────────────────────
+# Dedup worktrees: dir leaf and branch leaf often say the same thing.
+#   native worktree: dir "worktrees/0713-0844" + branch "worktree-0713-0844"
+#   task-card wt:    dir ".worktrees/B120"      + branch "task/B120"
+# In both, strip the worktree-/task- prefix from the branch; if what's left
+# equals the dir leaf, show it once as "wt <name>".
+dir_leaf=$(basename "$cwd_full")
+branch_leaf=$(echo "$git_branch" | sed 's#^worktree[-/]##; s#^task[-/]##')
+
+loc=""
+if [ -n "$git_branch" ] && [ "$branch_leaf" = "$dir_leaf" ] && [ "$git_branch" != "$dir_leaf" ]; then
+  # worktree: dir and branch are redundant → collapse to one
+  loc=$(printf "\033[33mwt %s\033[0m" "$dir_leaf")
+elif [ -n "$git_branch" ] && [ "$git_branch" != "main" ] && [ "$git_branch" != "master" ]; then
+  loc=$(printf "\033[33m%s\033[0m \033[32m(%s)\033[0m" "$cwd_base" "$git_branch")
 elif [ -n "$cwd_base" ]; then
-  parts=$(printf "\033[33m%s\033[0m" "$cwd_base")
+  loc=$(printf "\033[33m%s\033[0m" "$cwd_base")
 fi
 
-if [ -n "$model" ]; then
-  [ -n "$parts" ] && parts="${parts}${SEP}${model}" || parts="$model"
+line1=""
+if [ -n "$host" ]; then
+  line1=$(printf "\033[36m%s\033[0m" "$host")
 fi
+[ -n "$loc" ] && { [ -n "$line1" ] && line1="${line1}${SEP}${loc}" || line1="$loc"; }
 
-parts="${parts}${SEP}${ctx_part}"
+# ── Line 2: session (model · ctx · 5h · 7d) ───────────────────────
+line2=""
+[ -n "$model" ] && line2="$model"
+
+if [ -n "$ctx_part" ]; then
+  [ -n "$line2" ] && line2="${line2}${SEP}${ctx_part}" || line2="$ctx_part"
+fi
 
 if [ -n "$five_used" ] && [ -n "$five_resets" ]; then
   five_remaining=$(echo "$five_used" | awk '{printf "%.0f", 100 - $1}')
   now=$(date +%s)
   secs=$(( five_resets - now ))
   if [ "$secs" -le 0 ]; then
-    parts="${parts}${SEP}5h ready"
+    line2="${line2}${SEP}5h ready"
   else
     five_reset_time=$(date -r "$five_resets" "+%H:%M" 2>/dev/null || date -d "@$five_resets" "+%H:%M" 2>/dev/null)
-    parts="${parts}${SEP}5h ${five_remaining}% ~${five_reset_time}"
+    line2="${line2}${SEP}5h ${five_remaining}% ~${five_reset_time}"
   fi
 fi
 
 if [ -n "$week_used" ]; then
   week_remaining=$(echo "$week_used" | awk '{printf "%.0f", 100 - $1}')
-  parts="${parts}${SEP}7d ${week_remaining}%"
+  line2="${line2}${SEP}7d ${week_remaining}%"
 fi
 
-echo "$parts"
+# ── Line 3: 会话标题 ──────────────────────────────────────────────
+# CC 给每个会话自动生成一个标题（transcript 里的 ai-title），statusline 的
+# 入参 .session_name 就是它——若手动 /rename 过则优先给自定义标题。
+# 用途：同时开一堆会话时，一眼看出这个窗口在干什么。太长会挤掉别的信息，截断。
+# 覆盖优先：CC 只在第一条消息时起一次标题，之后话题跑偏也不会重算。
+# session-title.sh 这个 hook 会让 AI 在跑偏时把新标题写进这里。
+sid=$(echo "$input" | jq -r '.session_id // empty')
+override=""
+if [ -n "$sid" ] && [ -r "$HOME/.claude/session-title/$sid" ]; then
+  override=$(head -1 "$HOME/.claude/session-title/$sid")
+fi
+
+# 截断按「显示宽度」算不是按字数：中文一个字占两列，纯按字数截中文标题会撑爆窄分屏。
+title=$(echo "$input" | jq --arg ov "$override" -r '
+  .session_name = (if $ov != "" then $ov else .session_name end) |
+  # 宽字符（占两列）的码点区间，jq 不认 0x 写法所以用十进制
+  def cw: if . >= 4352 and (. <= 4447
+      or (. >= 11904 and . <= 42191)
+      or (. >= 44032 and . <= 55203)
+      or (. >= 63744 and . <= 64255)
+      or (. >= 65072 and . <= 65135)
+      or (. >= 65280 and . <= 65376)
+      or (. >= 65504 and . <= 65510)) then 2 else 1 end;
+  (.session_name // "") as $t
+  | if $t == "" then empty else
+      ($t | explode
+       | reduce .[] as $c ({w:0, out:[], over:false};
+           if .over then .
+           elif .w + ($c|cw) > 48 then .over = true
+           else {w: (.w + ($c|cw)), out: (.out + [$c]), over:false} end)
+       | if .over then (.out|implode) + "…" else (.out|implode) end)
+    end')
+line3=""
+if [ -n "$title" ]; then
+  line3=$(printf "\033[2;37m%s\033[0m" "$title")
+fi
+
+printf "%s\n%s\n" "$line1" "$line2"
+[ -n "$line3" ] && printf "%s\n" "$line3"
+exit 0
 ```
+<!-- END statusline-command.sh -->
 
 #### 步骤 2：在 `~/.claude/settings.json` 里注册
 
@@ -156,7 +231,10 @@ chmod +x ~/.claude/statusline-command.sh
 > 如果只想让 AI 帮你配好，可以把下面这段 prompt 丢给 Claude Code，它会调用 `statusline-setup` agent 自动写入脚本并改 settings：
 >
 > ```
-> 用 statusline-setup agent 帮我配置状态栏，显示：目录名（仅最后一段）、git 分支、模型名、上下文剩余 %、5 小时窗口剩余 % 与重置时刻、7 天窗口剩余 %。
+> 用 statusline-setup agent 帮我配置状态栏，分三行：
+> 第一行 机器名 · 父目录/当前目录 · git 分支（main/master 不显示；worktree 那种目录名和分支名重复的折叠成 wt <名字>）；
+> 第二行 模型名（只取首词）· 上下文剩余 % · 5 小时窗口剩余 % 与重置时刻 · 7 天窗口剩余 %；
+> 第三行 会话标题（入参 .session_name），按显示宽度截到 48 列，没有就不输出这行。
 > ```
 
 ---
@@ -641,50 +719,25 @@ Claude Code 会给每个会话自动起一个标题（`/resume` 列表里看到�
 
 关键取舍：**不另外跑一个小模型去定期重算标题**。判断「话题变了没有」，正在跟你对话的那个模型最清楚，也不多花一分钱、不多等一秒。
 
-#### 步骤 1：状态栏加一行
+#### 步骤 1：状态栏读标题
 
-状态栏脚本能从 stdin 的 JSON 里直接拿到标题，字段是 `.session_name`（手动 `/rename` 过就是你改的那个，否则是 AI 自动起的）。
-
-把技巧 3 里那个脚本结尾的 `echo "$parts"` 换成下面这段：
+[技巧 3](#3-配置底部状态栏显示用量信息和当前模型) 那份脚本已经带上了这段——它先看覆盖文件
+`~/.claude/session-title/<会话id>`，没有才回退到入参里的 `.session_name`
+（手动 `/rename` 过就是你改的那个，否则是 AI 自动起的），最后按显示宽度截到 48 列输出：
 
 ```sh
-# ── 会话标题（覆盖文件优先）──────────────────────────────────
 sid=$(echo "$input" | jq -r '.session_id // empty')
 override=""
 if [ -n "$sid" ] && [ -r "$HOME/.claude/session-title/$sid" ]; then
   override=$(head -1 "$HOME/.claude/session-title/$sid")
 fi
-
-# 截断按「显示宽度」算而不是按字数：中文一个字占两列，
-# 按字数截会在窄分屏里撑爆换行。
-title=$(echo "$input" | jq --arg ov "$override" -r '
-  .session_name = (if $ov != "" then $ov else .session_name end) |
-  # 宽字符（占两列）的码点区间，jq 不认 0x 写法所以用十进制
-  def cw: if . >= 4352 and (. <= 4447
-      or (. >= 11904 and . <= 42191)
-      or (. >= 44032 and . <= 55203)
-      or (. >= 63744 and . <= 64255)
-      or (. >= 65072 and . <= 65135)
-      or (. >= 65280 and . <= 65376)
-      or (. >= 65504 and . <= 65510)) then 2 else 1 end;
-  (.session_name // "") as $t
-  | if $t == "" then empty else
-      ($t | explode
-       | reduce .[] as $c ({w:0, out:[], over:false};
-           if .over then .
-           elif .w + ($c|cw) > 48 then .over = true
-           else {w: (.w + ($c|cw)), out: (.out + [$c]), over:false} end)
-       | if .over then (.out|implode) + "…" else (.out|implode) end)
-    end')
-
-echo "$parts"
-[ -n "$title" ] && printf "\033[2;37m%s\033[0m\n" "$title"
-exit 0
 ```
 
-状态栏支持多行输出，直接多 `printf` 一行就行。没有标题时那行不占位置。
+截断按**显示宽度**算而不是按字数：中文一个字占两列，按字数截会在窄分屏里撑爆换行。
+所以脚本里那段 jq 用码点区间给宽字符记 2 列——完整实现见技巧 3。
 
-> 注意：Claude Code 自己画的「bypass permissions on」提示永远排在状态栏最后，你的输出只能在它上面，塞不到它下面。
+> 注意：Claude Code 自己画的「bypass permissions on」提示永远排在状态栏最后，
+> 你的输出只能在它上面，塞不到它下面。
 
 #### 步骤 2：保存 hook 到 `~/.claude/hooks/session-title.sh`
 
@@ -758,7 +811,8 @@ exit 0
 ### 效果
 
 ```
-studio · Opus · ctx 94% · 5h 73% ~18:30 · 7d 82%
+studio · coding/myapp
+Opus · ctx 94% · 5h 73% ~18:30 · 7d 82%
 给状态栏加会话标题
 ```
 
