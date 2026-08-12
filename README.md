@@ -246,6 +246,20 @@ cp -r /tmp/cct/skills/inpro ~/.claude/skills/
 
 > **注意**：文档维护规则是**软约束**，靠模型读取 CLAUDE.md 后遵守，不是 harness 层强制。想要强制触发（比如 commit 前阻塞检查）用 hooks（`update-config` skill）。当前规则对日常项目已足够。
 
+### Codex 版
+
+`skills/inpro-codex/` 提供了对应的 Codex skill。它将 `AGENTS.md` 作为 `CLAUDE.md` 的等价项目指令文件，并在已有 `AGENTS.md` 时合并项目记忆规则。为遵守 Codex 的安全约定，它不会未经用户明确要求自动 `git init` 或创建 commit。
+
+安装到 Codex：
+
+```bash
+git clone https://github.com/andyleimc-source/claude-code-tips.git /tmp/cct
+mkdir -p ~/.codex/skills
+cp -r /tmp/cct/skills/inpro-codex ~/.codex/skills/inpro
+```
+
+重启 Codex 后，使用 `inpro` 或“初始化项目”触发。
+
 ---
 
 ## 6. 每次回答完播放提示音（Stop hook + 自然语言开关）
