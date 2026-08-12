@@ -623,6 +623,166 @@ vi 绑在 copy-mode-vi 表，绑错表不生效。改完跑 tmux source-file ~/.
 
 ---
 
+## 11. 状态栏显示会话标题，并让 AI 在话题跑偏时自己改名
+
+### 问题
+
+Claude Code 会给每个会话自动起一个标题（`/resume` 列表里看到的那个）。但它**只在你发第一条消息时生成一次**，之后聊到哪儿都不会重算。
+
+于是同时开五六个窗口时，状态栏只有目录名和模型名，根本分不清哪个在干什么；而且一个会话经常从「修登录 bug」聊到「重构支付模块」，标题却永远停在最初那句。
+
+### 解决办法
+
+三件套：
+
+1. 状态栏多打一行标题，且**优先读一个覆盖文件**（`~/.claude/session-title/<会话id>`）；
+2. 一个 `UserPromptSubmit` hook，每轮把当前标题注入上下文；
+3. 顺带授权 AI：发现话题跟标题对不上了，就自己把新标题写进那个覆盖文件。
+
+关键取舍：**不另外跑一个小模型去定期重算标题**。判断「话题变了没有」，正在跟你对话的那个模型最清楚，也不多花一分钱、不多等一秒。
+
+#### 步骤 1：状态栏加一行
+
+状态栏脚本能从 stdin 的 JSON 里直接拿到标题，字段是 `.session_name`（手动 `/rename` 过就是你改的那个，否则是 AI 自动起的）。
+
+把技巧 3 里那个脚本结尾的 `echo "$parts"` 换成下面这段：
+
+```sh
+# ── 会话标题（覆盖文件优先）──────────────────────────────────
+sid=$(echo "$input" | jq -r '.session_id // empty')
+override=""
+if [ -n "$sid" ] && [ -r "$HOME/.claude/session-title/$sid" ]; then
+  override=$(head -1 "$HOME/.claude/session-title/$sid")
+fi
+
+# 截断按「显示宽度」算而不是按字数：中文一个字占两列，
+# 按字数截会在窄分屏里撑爆换行。
+title=$(echo "$input" | jq --arg ov "$override" -r '
+  .session_name = (if $ov != "" then $ov else .session_name end) |
+  # 宽字符（占两列）的码点区间，jq 不认 0x 写法所以用十进制
+  def cw: if . >= 4352 and (. <= 4447
+      or (. >= 11904 and . <= 42191)
+      or (. >= 44032 and . <= 55203)
+      or (. >= 63744 and . <= 64255)
+      or (. >= 65072 and . <= 65135)
+      or (. >= 65280 and . <= 65376)
+      or (. >= 65504 and . <= 65510)) then 2 else 1 end;
+  (.session_name // "") as $t
+  | if $t == "" then empty else
+      ($t | explode
+       | reduce .[] as $c ({w:0, out:[], over:false};
+           if .over then .
+           elif .w + ($c|cw) > 48 then .over = true
+           else {w: (.w + ($c|cw)), out: (.out + [$c]), over:false} end)
+       | if .over then (.out|implode) + "…" else (.out|implode) end)
+    end')
+
+echo "$parts"
+[ -n "$title" ] && printf "\033[2;37m%s\033[0m\n" "$title"
+exit 0
+```
+
+状态栏支持多行输出，直接多 `printf` 一行就行。没有标题时那行不占位置。
+
+> 注意：Claude Code 自己画的「bypass permissions on」提示永远排在状态栏最后，你的输出只能在它上面，塞不到它下面。
+
+#### 步骤 2：保存 hook 到 `~/.claude/hooks/session-title.sh`
+
+```sh
+#!/bin/sh
+# UserPromptSubmit hook：把「本会话当前标题」注入上下文，并授权 AI 在话题跑偏时改名。
+set -u
+
+input=$(cat)
+sid=$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null)
+[ -n "$sid" ] || exit 0
+
+DIR="$HOME/.claude/session-title"
+OVERRIDE="$DIR/$sid"
+
+title=""
+src=""
+if [ -r "$OVERRIDE" ]; then
+  title=$(head -1 "$OVERRIDE")
+  src="改过一次"
+else
+  # 没改过：从 transcript 里捞 CC 自动起的那个
+  #（custom-title 是 /rename 写的，优先级更高）
+  tp=$(printf '%s' "$input" | jq -r '.transcript_path // empty' 2>/dev/null)
+  if [ -n "$tp" ] && [ -r "$tp" ]; then
+    line=$(LC_ALL=C grep '"type":"custom-title"' "$tp" 2>/dev/null | tail -1)
+    [ -n "$line" ] || line=$(LC_ALL=C grep '"type":"ai-title"' "$tp" 2>/dev/null | tail -1)
+    title=$(printf '%s' "$line" | jq -r '.customTitle // .aiTitle // empty' 2>/dev/null)
+  fi
+  src="CC 自动起的"
+fi
+
+[ -n "$title" ] || exit 0
+
+# 顺手清掉一个月前的残留（会话不会复活，不清会无限堆）
+find "$DIR" -type f -mtime +30 -delete 2>/dev/null
+
+cat <<EOF
+[会话标题] 当前状态栏显示：「${title}」（${src}）。
+如果这轮的话题已经明显不是这个标题在说的事了，就顺手改掉：
+mkdir -p ~/.claude/session-title && echo '新标题' > $OVERRIDE
+新标题用中文、不超过 12 个字、说清这个会话现在在干什么。没跑偏就什么都别做。
+两种情况都不要在回复里提这件事。
+EOF
+exit 0
+```
+
+⚠ 注意 heredoc 里写的是 `${title}` 而不是 `$title`——macOS 自带的是 bash 3.2，变量名后面**紧跟中文字符**时它会把中文一起当成变量名，报 `unbound variable`。加花括号才断得开。
+
+#### 步骤 3：在 `~/.claude/settings.json` 里注册
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh $HOME/.claude/hooks/session-title.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+`UserPromptSubmit` hook 打到 stdout 的内容会作为上下文喂给模型，所以这条**不要加 `"async": true`**，异步的输出注入不进去。
+
+### 效果
+
+```
+studio · Opus · ctx 94% · 5h 73% ~18:30 · 7d 82%
+给状态栏加会话标题
+```
+
+聊着聊着话题变了，下一轮 AI 会自己把第三行改掉，你什么都不用做。开销是每轮约 30 个 token 的注入，可以忽略。
+
+### 让 AI 帮你配
+
+把下面这段 prompt 丢给 Claude Code：
+
+```
+帮我给状态栏加一行会话标题，并让你在话题跑偏时自动改名，按这三步做：
+1. 改 ~/.claude/statusline-command.sh，多输出一行会话标题；
+   标题优先读 ~/.claude/session-title/<session_id>，读不到再用入参里的 .session_name；
+   按显示宽度截断到 48 列（中文算两列），没有标题就不输出这行。
+2. 新建 ~/.claude/hooks/session-title.sh，读 stdin 的 JSON 拿 session_id 和 transcript_path，
+   取出当前标题（覆盖文件优先，否则从 transcript 里 grep 最后一条 custom-title / ai-title），
+   打印到 stdout 告诉你当前标题是什么、以及话题跑偏时该把新标题写到哪个文件。
+   注意 macOS 是 bash 3.2，变量后面紧跟中文要写成 ${var}。
+3. 在 ~/.claude/settings.json 的 hooks.UserPromptSubmit 里注册这个脚本，不要设 async。
+配完用假的 JSON 各跑一遍验证，再告诉我怎么让当前会话生效。
+```
+
+---
+
 ## 关注我
 
 <img src="./雷码工坊微信公众号.jpg" alt="雷码工坊笔记微信公众号" width="200" />
